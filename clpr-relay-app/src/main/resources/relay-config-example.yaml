@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: Apache-2.0
+# CLPR EVM Relay — Example configuration file
+#
+# To use this file, copy it to the working directory as "relay.yaml" (loaded automatically)
+# or point to it explicitly via the relay.configFile system property or RELAY_CONFIG_FILE
+# environment variable.
+#
+# Only the scalar `grpc` and `backoff` blocks are system-property overridable (with a "relay."
+# prefix, e.g. relay.grpc.sync.port=9545). The `localNetworks`, `clprServices`, and `peerProofTypes`
+# sections are YAML-only — they cannot be overridden via system properties.
+
+# gRPC server settings. The inbound transport is two listeners:
+#
+#   info : ALWAYS plaintext. Serves discoverEndpoints / getLedgerConfiguration, which return
+#          chain-verifiable public data, so they are never put behind TLS.
+#   sync : the data plane. Plaintext by default; mandatory mTLS when sync.tlsEnabled is true (then
+#          tlsKeyPath is required), in which case the sync listener requires the dialer's client leaf to
+#          chain to a CA in the on-chain roster at the TLS handshake.
+#
+# Both ports are always served and must differ. Outbound dialing is NOT configured here — it is driven
+# by each peer's on-chain tls_certificate.
+grpc:
+  info:
+    # TCP port for the always-plaintext info listener (default: 9546).
+    port: 9546
+  sync:
+    # TCP port for the sync (data-plane) listener (default: 9545).
+    port: 9545
+    # Turn the sync listener into mandatory mTLS. When true, tlsKeyPath is REQUIRED; when false (the
+    # default) it is ignored and the sync listener is plaintext.
+    tlsEnabled: false
+    # This endpoint's ECDSA P-384 CA PRIVATE KEY (PKCS#8 PEM/DER) — the private half of the CA whose
+    # certificate is published on-chain as tls_certificate. Required (and only used) when tlsEnabled is
+    # true. The relay does NOT read the CA certificate from disk: it mints an Ed25519 leaf signed by this
+    # key and presents the leaf at every handshake; peers accept a leaf that chains to the on-chain CA.
+    # The on-chain CA cert MUST be self-signed by this key and carry subject CN=x (the JVM rejects an
+    # empty DN, so this minimal single-character CN is used). Keep it small — it is ledger state cached
+    # in every peer roster — though the relay no longer enforces a byte ceiling on read.
+    tlsKeyPath: ""
+    # How often the in-memory Ed25519 leaf certificate is re-minted, in seconds. The leaf is
+    # regenerated on demand the first time a TLS handshake occurs after the window elapses.
+    # Set to 0 to disable rotation (the leaf is then valid for 10 years). Required only when
+    # tlsEnabled is true; ignored otherwise. (default: 86400 = 24 h)
+    leafCertValiditySeconds: 86400
+  # Maximum gRPC message size in bytes (default: 1048576 = 1 MiB).
+  # Applied symmetrically: inbound on every PBJ Helidon listener AND outbound channels in
+  # ClprEndpointClient (via grpc-netty maxInboundMessageSize). Raise this if bundles or
+  # proofs grow large; the PBJ default of 10 KiB is too small for production payloads.
+  maxMessageSize: 1048576
+
+# Named local networks. Each entry declares the proof type and network connection
+# parameters for a chain the relay connects to locally. A network is referenced by one or
+# more clprServices entries (below).
+#
+# Proof types:
+#   QBFT     — EVM chain using QBFT consensus (e.g. Hyperledger Besu).
+#              getLedgerConfiguration returns a QbftLedgerConfigurationPayload
+#              (epoch block header + EIP-1186 proofs).
+#   CometBFT — EVM chain using CometBFT consensus (Sei). getLedgerConfiguration returns a
+#              ClprSeiLedgerConfigurationPayload (validator set + ledger configuration).
+#
+# (The Hiero proof type is valid only as a channel's peerProofType, not for a local network.)
+localNetworks:
+  # ── Local Besu QBFT chain ──
+  - id: besu-local
+    proofType: QBFT
+    # Common EVM connection parameters (contract reads + submitBundle transactions).
+    evm:
+      # HTTP URL of the EVM JSON-RPC endpoint (default: http://localhost:8545)
+      jsonRpcUrl: http://localhost:8545
+
+      # EIP-155 chain identifier (default: 1 = Ethereum mainnet)
+      chainId: 1337
+
+      # Hard cap on maxFeePerGas in wei. Default Long.MAX_VALUE means no cap.
+      # Example: 500000000000 = 500 gwei cap to protect against gas price spikes.
+      maxGasPriceCap: 9223372036854775807
+
+      # EIP-1559 priority fee (miner tip) in wei (default: 2000000000 = 2 gwei)
+      gasPriorityFee: 2000000000
+
+      # Multiplier applied to the current base fee when computing maxFeePerGas (default: 1.2)
+      gasBufferMultiplier: 1.2
+
+      # Interval in ms between successive on-chain state polls by the listener (default: 1000 = 1s).
+      pollIntervalMs: 1000
+    # QBFT proof parameters (only used for QBFT networks).
+    qbft:
+      # QBFT epoch length used to compute the epoch-boundary block header for the
+      # getLedgerConfiguration payload (default: 30000).
+      epochLength: 30000
+
+      # Maximum epoch block headers to include in a bundle when the remote trust anchor is
+      # behind (default: 5).
+      maxEpochBlockHeadersPerBundle: 5
+
+      # Maximum messages to include in a single bundle (default: 10).
+      maxMessagesPerBundle: 10
+
+  # ── Local Sei (CometBFT) chain ──
+  # Sei is EVM-compatible, so it reuses the evm: block for the EVM side (contract reads + submitBundle).
+  # The CometBFT proof path is configured in the separate `cometBft:` block below.
+  - id: sei-local
+    proofType: CometBFT
+    evm:
+      # EVM JSON-RPC endpoint (contract reads + submitBundle transactions).
+      jsonRpcUrl: http://localhost:8545
+      # Sei EVM chain id (mainnet pacific-1 = 1329; a local devnet derives its own value).
+      chainId: 1329
+    # CometBFT proof parameters (only used for CometBFT networks).
+    cometBft:
+      # CometBFT RPC endpoint for signed headers, validator sets, and ICS-23 proofs
+      # (default: http://localhost:26657).
+      cometBftRpcUrl: http://localhost:26657
+      # Maximum messages to include in a CometBFT bundle (default: 10).
+      maxMessagesPerBundle: 10
+      # Maximum prior validator-set updates (trust-anchor rotations) to include in a single bundle
+      # when advancing a lagging peer across validator-set changes (default: 10).
+      maxPriorValidatorSetUpdates: 10
+      # Max retry attempts for a CometBFT RPC call on transient failure (default: 3).
+      maxRetries: 3
+      # Per-request CometBFT RPC response timeout in ms (default: 5000).
+      requestTimeoutMs: 5000
+
+# ClprService contract deployments the relay operates against. Each entry pins one on-chain
+# ClprService contract on one localNetwork, carries the signing key(s) for its channels, and
+# declares how channels are brought online (predefined by id and/or discovered on-chain).
+clprServices:
+  - # Checksummed hex address of the deployed CLPR Service contract. REQUIRED — the default zero
+    # address is a non-functional placeholder. Multiple services may target the same localNetwork.
+    serviceAddress: "0x0000000000000000000000000000000000000000"
+    # id of the localNetworks entry this contract is deployed on. REQUIRED.
+    localNetwork: besu-local
+
+    # REQUIRED (unless every channel has a per-channel key below): hex-encoded ECDSA
+    # secp256k1 private key used to sign EIP-1559 submitBundle transactions and outbound sync
+    # payloads for every channel on this service without an override. The EVM sender address is
+    # derived from this key. Example value below is the Anvil dev account 0 key — DO NOT use in
+    # production.
+    defaultSigningPrivateKeyHex: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+    # Poll this contract for ChannelCompleted events and register channels that appear
+    # on-chain after startup (default: false). Requires defaultSigningPrivateKeyHex. Opt-in, so
+    # existing deployments are unaffected.
+    discoverChannels: false
+    # Block from which channel discovery starts its ChannelCompleted log scan (default: 0).
+    # Set to the block at which the ClprService was deployed to avoid rescanning the whole chain
+    # from genesis on large networks.
+    discoveryStartBlock: 0
+
+    # Channels registered at startup by id (used when discovery is disabled, or alongside it).
+    # Each channel's peerProofType is resolved at runtime from its on-chain peer chainId (see
+    # peerProofTypes below).
+    predefinedChannels:
+      - "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+    # Optional per-channel signing-key overrides, keyed by channel id. A channel listed
+    # here uses its own key instead of defaultSigningPrivateKeyHex.
+    perChannelSigningPrivateKeyHex: {}
+    #   "0x00...01": "0x<per-channel-key>"
+
+# Failure-backoff policy for the per-channel loops (sync loop + listener poll loop).
+# When a loop iteration throws an unchecked exception the loop survives, logs at ERROR, and
+# waits a bounded, exponentially-growing delay before retrying — never the tight cadence.
+# The first clean iteration resets the backoff. System properties: relay.backoff.baseMs / .capMs.
+backoff:
+  # First-failure backoff in ms; doubles per consecutive failure up to capMs (default: 1000 = 1s).
+  baseMs: 1000
+  # Ceiling on the per-failure backoff in ms (default: 30000 = 30s).
+  capMs: 30000
+
+# Map of peer CAIP-2 chainId -> proof type. Used to resolve a channel's peerProofType from its
+# on-chain peer chainId (for both predefined and discovered channels). An EVM ("eip155:*") peer
+# with no entry here falls back to the local network's proofType; a non-EVM peer (e.g. Hiero) with
+# no entry cannot be served and is skipped. Optional; empty by default.
+# peerProofTypes:
+#   "eip155:1337": QBFT
+#   "hiero:mainnet": Hiero

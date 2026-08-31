@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Separate ConfigMap for Swirlds logging configuration.
+# Mounted as a plain directory (no subPath) so that kubelet propagates
+# helm upgrade changes to the file on disk without restarting the pod.
+# The relay's reloadConfigPeriod picks up the new levels within 30 s.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}-logging
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+data:
+  log.properties: |
+    logging.level={{ .Values.logging.level }}
+    {{- range $pkg, $lvl := .Values.logging.levels }}
+    logging.level.{{ $pkg }}={{ $lvl }}
+    {{- end }}
+    logging.reloadConfigPeriod={{ .Values.logging.reloadPeriod }}
+    logging.handler.console.type={{ .Values.logging.handler.type }}
+    logging.handler.console.enabled={{ .Values.logging.handler.enabled }}
+    logging.handler.console.formatTimestamp={{ .Values.logging.handler.formatTimestamp }}
+    logging.handler.console.inheritLevels={{ .Values.logging.handler.inheritLevels }}

@@ -1,0 +1,159 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "clpr-evm-endpoint.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pods when the ConfigMap changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "clpr-evm-endpoint.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "clpr-evm-endpoint.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: relay
+          image: {{ include "clpr-evm-endpoint.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            # Injected from pod metadata — useful for correlating logs across replicas.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # JVM flags: user-specified options plus pod identity.
+            - name: JAVA_OPTS
+              value: >-
+                {{ .Values.javaOpts }}
+                -Drelay.podName=$(POD_NAME)
+            # Points the Swirlds logging system at the live-mounted log.properties.
+            # The file is updated in place by the kubelet when the ConfigMap changes,
+            # and the relay reloads it every reloadConfigPeriod (30 s) without a restart.
+            - name: LOG_CONFIG_PATH
+              value: /app/logging/log.properties
+            # Per-service signing keys injected from Secrets — never stored in the ConfigMap.
+            # Each SIGNING_KEY_<ADDR> env var is substituted into the corresponding
+            # __SIGNING_KEY_<ADDR>__ sentinel in relay.yaml at container start.
+            # Per-channel overrides follow the same pattern with the channel id as key.
+            {{- range .Values.clprServices }}
+            {{- $addr := .serviceAddress | default "0x0000000000000000000000000000000000000000" }}
+            {{- $addrKey := $addr | upper | trimPrefix "0X" }}
+            {{- $secretName := (.signing).existingSecret | default (include "clpr-evm-endpoint.signingSecretName" $) }}
+            {{- $secretKey := (.signing).secretKey | default $.Values.signing.secretKey | default "signingPrivateKeyHex" }}
+            - name: SIGNING_KEY_{{ $addrKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $secretKey }}
+                  optional: true
+            {{- range .perChannelSigningKeys }}
+            {{- $connKey := .channelId | upper | trimPrefix "0X" }}
+            {{- $connSecretName := (.signing).existingSecret | default (include "clpr-evm-endpoint.signingSecretName" $) }}
+            {{- $connSecretKey := (.signing).secretKey | default $.Values.signing.secretKey | default "signingPrivateKeyHex" }}
+            - name: SIGNING_KEY_{{ $connKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $connSecretName }}
+                  key: {{ $connSecretKey }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: grpc-sync
+              containerPort: {{ .Values.grpc.sync.port }}
+              protocol: TCP
+            - name: grpc-info
+              containerPort: {{ .Values.grpc.info.port }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          # Liveness: the gRPC port must be accepting channels.
+          livenessProbe:
+            tcpSocket:
+              port: grpc-sync
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          # Readiness: same check — pod only receives traffic once gRPC is up.
+          readinessProbe:
+            tcpSocket:
+              port: grpc-sync
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/relay.yaml
+              subPath: relay.yaml
+              readOnly: true
+            # Mounted as a directory (no subPath) so kubelet propagates ConfigMap
+            # updates to the file on disk, enabling live log-level changes.
+            - name: logging-config
+              mountPath: /app/logging
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.grpc.sync.tls.enabled }}
+            - name: tls-ca-key
+              mountPath: /app/tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "clpr-evm-endpoint.fullname" . }}
+        - name: logging-config
+          configMap:
+            name: {{ include "clpr-evm-endpoint.fullname" . }}-logging
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.grpc.sync.tls.enabled }}
+        - name: tls-ca-key
+          secret:
+            secretName: {{ required "grpc.sync.tls.existingSecret is required when grpc.sync.tls.enabled is true" .Values.grpc.sync.tls.existingSecret }}
+            items:
+              - key: {{ .Values.grpc.sync.tls.secretKey }}
+                path: ca-key.der
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

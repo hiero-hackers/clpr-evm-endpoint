@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: clpr-relay
+    static_configs:
+      - targets: ['relay-a:9547', 'relay-b:9547']
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+):\d+'
+        target_label: instance
+        replacement: '$1'

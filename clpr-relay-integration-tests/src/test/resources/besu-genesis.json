@@ -1,0 +1,37 @@
+{
+  "config": {
+    "chainId": 1337,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "shanghaiTime": 0,
+    "qbft": {
+      "blockperiodseconds": 1,
+      "epochlength": 30000,
+      "requesttimeoutseconds": 4
+    }
+  },
+  "nonce": "0x0",
+  "timestamp": "0x0",
+  "gasLimit": "0x1fffffffffffff",
+  "difficulty": "0x1",
+  "mixHash": "0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365",
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "extraData": "0xf83aa00000000000000000000000000000000000000000000000000000000000000000d594fe3b557e8fb62b89f4916b721be55ceb828dbd73c080c0",
+  "alloc": {
+    "fe3b557e8fb62b89f4916b721be55ceb828dbd73": {
+      "privateKey": "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63",
+      "balance": "0xad78ebc5ac6200000"
+    },
+    "1234567890123456789012345678901234567890": {
+      "balance": "0",
+      "code": "0x60806040526004361061001e5760003560e01c80633fa4f24514610023575b600080fd5b61002b600054565b60405190815260200160405180910390f35b",
+      "storage": {
+        "0xedb38a93e6e2e82dbb40826a878df1d817a37ef13fcaa25248649a90fa47497c": "0x2fb88ac06bd872a82e3338db1e6b58c3b517bf8329538dc836b53e69d626c11c",
+        "0x17bc176d2408558f6e4111feebc3cab4e16b63e967be91cde721f4c8a488b553": "0x01",
+        "0x17bc176d2408558f6e4111feebc3cab4e16b63e967be91cde721f4c8a488b554": "0x01",
+        "0x17bc176d2408558f6e4111feebc3cab4e16b63e967be91cde721f4c8a488b556": "0x01",
+        "0x17bc176d2408558f6e4111feebc3cab4e16b63e967be91cde721f4c8a488b557": "0x01"
+      }
+    }
+  }
+}

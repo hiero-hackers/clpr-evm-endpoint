@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}-metrics
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.metrics.service.type }}
+  ports:
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "clpr-evm-endpoint.selectorLabels" . | nindent 4 }}
+{{- end }}

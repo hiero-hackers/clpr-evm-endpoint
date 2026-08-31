@@ -1,0 +1,271 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+# Override the namespace for all resources in this chart. When left empty the
+# release namespace (.Release.Namespace) is used. Useful when the chart is
+# installed cluster-wide (e.g. via ArgoCD or Flux) and the target namespace
+# differs from the one passed to `helm install -n`.
+namespaceOverride: ""
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+# The image is pulled from the JFrog Artifactory client (fetch) URL:
+#   artifacts.hashgraph.io/clpr-docker-release/clpr-evm-endpoint
+# This is the read-only virtual repository that aggregates published releases;
+# the publish target (`clpr-evm-endpoint-docker-release`) is only used by the
+# release workflow and is not exposed to consumers.
+#
+# Override `registry` and `repository` to consume the image from a different
+# location (mirror, internal proxy, etc.).
+#
+# `tag` defaults to the chart's appVersion when left empty, so a `helm upgrade`
+# to a new chart version automatically rolls the pods to the matching image.
+image:
+  registry: artifacts.hashgraph.io
+  repository: clpr-docker-release/clpr-evm-endpoint
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ── Service account ───────────────────────────────────────────────────────────
+serviceAccount:
+  # Create a dedicated ServiceAccount for the relay pod.
+  # Set to false to use the namespace default ServiceAccount.
+  create: true
+  # Name of the ServiceAccount. Defaults to the chart fullname when empty.
+  name: ""
+  # Annotations added to the ServiceAccount — useful for IRSA (AWS), Workload
+  # Identity (GCP), or other cloud-provider IAM integrations.
+  annotations: {}
+  # Whether to auto-mount the service account token into the pod.
+  automountToken: false
+
+# Single replica: the relay holds an in-memory nonce tracker and PeerEndpointCache
+# that cannot be shared across replicas without a distributed cache layer like redis or hazelcast.
+replicaCount: 1
+
+# ── gRPC server ───────────────────────────────────────────────────────────────
+# Inbound transport is two always-plaintext listeners: an info listener and a sync (data-plane) listener.
+# Both ports are always served and must differ.
+grpc:
+  # Maximum gRPC message size in bytes (applied to every listener and outbound channel).
+  maxMessageSize: 1048576
+  info:
+    # Always-plaintext info port (discoverEndpoints / getLedgerConfiguration).
+    port: 9546
+  sync:
+    # Sync (data-plane) port peers dial.
+    port: 9545
+    # ── mTLS (optional) ───────────────────────────────────────────────────────
+    # When enabled, the sync listener requires mutual TLS. The CA private key
+    # (PKCS#8 DER) must be stored in a pre-provisioned Kubernetes Secret; the
+    # chart mounts it read-only into the container at /app/tls/ca-key.der and
+    # sets relay.grpc.sync.tlsKeyPath accordingly.
+    #
+    # The chart does NOT create this Secret — provision it before installing:
+    #   kubectl create secret generic <name> \
+    #     --from-file=tlsCaKey=/path/to/ca-key.der
+    tls:
+      enabled: false
+      # Name of the pre-provisioned Secret containing the CA private key.
+      existingSecret: ""
+      # Key within the Secret that holds the DER-encoded CA private key bytes.
+      secretKey: "tlsCaKey"
+  service:
+    # LoadBalancer exposes the gRPC sync port(s) to peer relays on other clusters.
+    # Change to ClusterIP if peers are in the same cluster or behind an ingress.
+    type: LoadBalancer
+    # Use provider-specific annotations to request a static IP — spec.loadBalancerIP
+    # was deprecated in Kubernetes 1.24. Examples:
+    #   AWS:     service.beta.kubernetes.io/aws-load-balancer-eip-allocation-ids: eipalloc-xxx
+    #   GCP:     networking.gke.io/load-balancer-ip-addresses: my-address-name
+    #   Azure:   service.beta.kubernetes.io/azure-load-balancer-ipv4: 1.2.3.4
+    annotations: {}
+
+# ── Prometheus metrics ────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  # Kept distinct from the gRPC info port (9546) so the two HTTP/gRPC servers don't collide.
+  port: 9547
+  service:
+    type: ClusterIP
+
+  serviceMonitor:
+    enabled: false
+    # Additional labels added to the ServiceMonitor
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+
+
+# ── Local networks ────────────────────────────────────────────────────────────
+# Named local networks. Each entry declares the proof type and the network
+# channel parameters for a chain the relay submits transactions to.
+#
+# Supported proof types:
+#   QBFT     — EVM chain using QBFT consensus (e.g. Hyperledger Besu).
+#   CometBFT — EVM chain using CometBFT consensus (Sei); add a `cometBft:` block alongside `evm:`.
+localNetworks:
+  - id: local
+    proofType: QBFT
+    evm:
+      # HTTP(S) URL of the EVM JSON-RPC endpoint.
+      jsonRpcUrl: "http://localhost:8545"
+
+      # EIP-155 chain ID of the target ledger.
+      chainId: 1
+
+      # Hard cap on maxFeePerGas in wei. Quoted to avoid scientific notation.
+      maxGasPriceCap: "20000000000"
+
+      # EIP-1559 priority fee (miner tip) in wei.
+      gasPriorityFee: "1000000000"
+
+      # Multiplier applied to current baseFeePerGas when computing maxFeePerGas.
+      gasBufferMultiplier: "1.2"
+    # QBFT proof parameters (optional; omit to accept loader defaults of 30000 / 5 / 10).
+    # qbft:
+    #   epochLength: 30000
+    #   maxEpochBlockHeadersPerBundle: 5
+    #   maxMessagesPerBundle: 10
+  # CometBFT (Sei) example — uncomment and adjust:
+  # - id: sei
+  #   proofType: CometBFT
+  #   evm:
+  #     jsonRpcUrl: "http://sei:8545"
+  #     chainId: 1329
+  #   cometBft:
+  #     cometBftRpcUrl: "http://sei:26657"
+  #     maxMessagesPerBundle: 10
+  #     maxPriorValidatorSetUpdates: 10
+  #     maxRetries: 3
+  #     requestTimeoutMs: 5000
+
+# ── CLPR services ─────────────────────────────────────────────────────────────
+# Each entry is one deployed ClprService contract this relay operates against.
+# serviceAddress:          checksummed hex address of the ClprService contract.
+#                          Required in production — the default zero address is a
+#                          non-functional placeholder.
+# localNetwork:            id of a localNetworks entry the relay submits through.
+# discoverChannels:     poll the contract for channels that appear on-chain
+#                          and register them at runtime (default false).
+# discoveryStartBlock:     block to start the ChannelCompleted log scan from.
+# predefinedChannels:   0x-prefixed 32-byte channel ids to register at startup.
+# signing.existingSecret:  override the global signing.existingSecret for this service.
+# signing.secretKey:       override the key name within the Secret for this service.
+# perChannelSigningKeys: per-channel key overrides, each with a channelId and
+#                          optional signing.existingSecret / signing.secretKey.
+#
+# Signing keys are NOT stored in this ConfigMap. Each service's defaultSigningPrivateKeyHex
+# is an address-keyed sentinel (__SIGNING_KEY_<ADDR>__) substituted at container start from
+# a SIGNING_KEY_<ADDR> env var sourced from the Secret. Per-channel keys follow the same
+# pattern using the 32-byte channel id as the key. All keys may live in a single Secret
+# under different key names, or in separate Secrets — see signing.existingSecret below.
+#
+# A peer's proof type is resolved from its on-chain chainId via `peerProofTypes`
+# below (falling back to the local network's proofType for eip155 peers).
+clprServices: []
+# Single-service example (uses the global signing.existingSecret):
+# - serviceAddress: "0x0000000000000000000000000000000000000000"
+#   localNetwork: local
+#   discoverChannels: false
+#   discoveryStartBlock: 0
+#   predefinedChannels:
+#     - "0x0000000000000000000000000000000000000000000000000000000000000001"
+#
+# Multi-service example with per-service and per-channel key overrides:
+# - serviceAddress: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+#   localNetwork: local
+#   signing:
+#     existingSecret: "relay-keys-service-a"
+#     secretKey: "signingPrivateKeyHex"
+#   perChannelSigningKeys:
+#     - channelId: "0x0000000000000000000000000000000000000000000000000000000000000001"
+#       signing:
+#         existingSecret: "relay-keys-conn1"
+#         secretKey: "signingPrivateKeyHex"
+# - serviceAddress: "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+#   localNetwork: local
+
+# ── Peer proof types ──────────────────────────────────────────────────────────
+# Map of peer CAIP-2 chainId -> proof type, used to resolve each channel's peer
+# proof type from its on-chain peer chainId. Omit to use the relay's built-in
+# defaults (eip155:1337 -> QBFT, hiero:mainnet/hiero:localnet -> Hiero).
+peerProofTypes: {}
+#   "hiero:mainnet": Hiero
+#   "eip155:1329": CometBFT
+
+signing:
+  # Name of a pre-provisioned Kubernetes Secret containing the signing private key.
+  # Required — the chart does not create this Secret. Per-service or per-channel
+  # overrides (signing.existingSecret / signing.secretKey under each clprServices entry)
+  # take precedence over these global values for that service or channel.
+  existingSecret: ""
+  # Key within the Secret that holds the hex-encoded signing private key.
+  # Defaults to "signingPrivateKeyHex" when unset.
+  secretKey: "signingPrivateKeyHex"
+
+# Extra flags passed to java via the JAVA_OPTS env var.
+# Virtual threads (one per channel sync task) are used throughout;
+# Tune -Xmx based on the number of open channels.
+javaOpts: "-Xms128m -Xmx512m"
+
+logging:
+  # Root log level applied to all loggers not matched by a more specific entry.
+  # Levels (least to most verbose): OFF, ERROR, WARN, INFO, DEBUG, TRACE.
+  level: INFO
+
+  # Per-package overrides
+  levels:
+    "org.hiero.clpr.relay": INFO
+
+  # How often the Swirlds logging system re-reads log.properties for level changes.
+  # Set to 0 to disable hot-reload (requires pod restart to change levels).
+  reloadPeriod: 30s
+
+  handler:
+    type: console-immediate
+    enabled: true
+    # Prefix each log line with an ISO-8601 timestamp.
+    formatTimestamp: true
+    # Inherit log levels from the root/package configuration above.
+    inheritLevels: true
+
+  # Grafana Alloy / Grafana Agent PodLogs CRD
+  # Requires the Grafana Alloy (or Grafana Agent Operator) CRDs to be installed.
+  podLogs:
+    enabled: false
+    labels: {}
+    # Pipeline stages applied to each log line before forwarding to Loki.
+    # See https://grafana.com/docs/alloy/latest/reference/components/loki/loki.process/
+    pipelineStages: []
+    # Extra relabeling rules (e.g. drop noisy lines, add static labels).
+    relabelings: []
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "2"
+    memory: "1Gi"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

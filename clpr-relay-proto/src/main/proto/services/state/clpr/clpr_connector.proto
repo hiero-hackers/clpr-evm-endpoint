@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package com.hedera.hapi.node.state.clpr;
+
+// SPDX-License-Identifier: Apache-2.0
+option java_package = "com.hederahashgraph.api.proto.java";
+// <<<pbj.java_package = "com.hedera.hapi.node.state.clpr">>> This comment is special code for setting PBJ Compiler java package
+option java_multiple_files = true;
+
+import "services/basic_types.proto";
+
+/**
+ * Key for the CONNECTORS state.
+ * Uniquely identifies a Connector by its peer-side application address.
+ */
+message ClprConnectorKey {
+    /**
+     * Peer-side application address of the Connector.
+     */
+    bytes source_connector_address = 1;
+}
+
+/**
+ * On-ledger state for a single CLPR Connector.
+ * Keyed by ClprConnectorKey (source_connector_address).
+ *
+ * A Connector maps a peer-chain application address to a local authorization
+ * contract. The connector contract is itself a smart contract with its own
+ * balance. Connectors are registered globally on the ClprService; when an
+ * application sends a message it picks the Channel and Connector independently.
+ */
+message ClprConnector {
+    /**
+     * Peer-side application address that sends messages through this Connector.
+     */
+    bytes source_connector_address = 1;
+
+    /**
+     * Local authorization contract that governs message dispatch.
+     */
+    proto.ContractID connector_contract = 2;
+
+    /**
+     * Key that authorizes administrative operations (deregister, update).
+     * May be a standard Ed25519/ECDSA key, a KeyList for multi-sig,
+     * or a ContractKey to allow the connector contract itself to authorize.
+     */
+    proto.Key admin_key = 3;
+
+    /**
+     * Slashable bond (in tinybars).
+     */
+    uint64 locked_stake = 4;
+
+    /**
+     * Cumulative slash count for penalty escalation.
+     */
+    uint32 slash_count = 5;
+}

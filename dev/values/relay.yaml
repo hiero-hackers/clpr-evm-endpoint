@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Reference values for local kind development.
+# kind-setup.sh passes all required values via --set flags; this file documents
+# the available options and can be used for manual Helm invocations.
+
+image:
+  registry: ""           # empty = use local image (no registry prefix)
+  repository: clpr-evm-endpoint
+  tag: dev
+  pullPolicy: Never      # Never pull — use the image loaded via `kind load`
+
+# ── Metrics & observability ────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  port: 9547
+
+  # Prometheus Operator ServiceMonitor — requires kube-prometheus-stack.
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    scrapeTimeout: 10s
+
+# ── gRPC ───────────────────────────────────────────────────────────────────────
+grpc:
+  info:
+    port: 9546
+  sync:
+    port: 9545
+  service:
+    type: ClusterIP
+
+# ── Local networks ─────────────────────────────────────────────────────────────
+# Anvil runs as a ClusterIP Service inside kind; kind-setup.sh sets
+# localNetworks[0].evm.jsonRpcUrl to http://anvil:8545 via --set.
+localNetworks:
+  - id: local
+    proofType: QBFT
+    evm:
+      jsonRpcUrl: "http://anvil:8545"
+      chainId: 1337
+      maxGasPriceCap: "20000000000"
+      gasPriorityFee: "1000000000"
+      gasBufferMultiplier: "1.2"
+
+# ── Channels ────────────────────────────────────────────────────────────────
+# serviceAddress must be set to the deployed ClprService contract address.
+channels: []
+
+# ── Signing key ────────────────────────────────────────────────────────────────
+# kind-setup.sh creates the secret and references it via signing.existingSecret.
+signing:
+  existingSecret: ""
+
+# ── Resources (minimal for local kind) ─────────────────────────────────────────
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "1"
+    memory: "512Mi"
+
+javaOpts: "-Xms64m -Xmx256m"

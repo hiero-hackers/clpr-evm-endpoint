@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package com.hedera.hapi.node.state.clpr;
+
+// SPDX-License-Identifier: Apache-2.0
+option java_package = "com.hederahashgraph.api.proto.java";
+// <<<pbj.java_package = "com.hedera.hapi.node.state.clpr">>> This comment is special code for setting PBJ Compiler java package
+option java_multiple_files = true;
+
+import "services/state/clpr/clpr_channel.proto";
+import "services/state/clpr/clpr_message.proto";
+
+/**
+ * A minimal "lens" over a Hiero {@code com.hedera.hapi.block.stream.StateProof}.
+ *
+ * A Hiero consensus node sends its native block-stream StateProof as the opaque CLPR bundle_payload.
+ * The relay does not verify it (the on-chain verifier contract does) — it only needs to pull out the
+ * CLPR channel leaf and message leaves. Rather than depend on the entire block-stream proto family
+ * (StateProof / MerklePath / StateItem / StateValue — the last being the whole Hedera state schema),
+ * these "view" messages declare ONLY the fields the relay traverses, with field numbers and wire types
+ * matching the real protos. PBJ parses non-strict by default, so every field NOT declared here — the
+ * TSS signed_block_proof, sibling hashes, next_path_index, StateItem.key, the ~60 other StateValue
+ * variants — is skipped rather than failing the parse. This keeps decoding tolerant of Hiero-side
+ * schema growth while staying fully generated/type-safe (no hand-rolled wire walking).
+ *
+ * Field-number provenance (verified against the Hiero block-stream protos):
+ *   StateProof.paths = 1
+ *   MerklePath.state_item_leaf = 4   (bytes on the wire; an embedded message is wire-compatible)
+ *   StateItem.value = 3
+ *   StateValue.ClprService_I_CHANNELS = 60, StateValue.ClprService_I_MESSAGE_QUEUE = 62
+ */
+message ClprStateProofView {
+    /**
+     * Merkle paths from the signed block root to each proven leaf (StateProof.paths).
+     */
+    repeated ClprMerklePathView paths = 1;
+}
+
+/**
+ * View of a Hiero {@code MerklePath}: only the state-item leaf is needed.
+ */
+message ClprMerklePathView {
+    /**
+     * The proven leaf, declared as an embedded message. On the wire this field is {@code bytes}
+     * carrying a serialised {@code StateItem}; a length-delimited {@code bytes} field and an
+     * embedded message share the same wire type, so PBJ parses it recursively.
+     */
+    ClprStateItemView state_item_leaf = 4;
+}
+
+/**
+ * View of a Hiero {@code StateItem}: only the value is needed (the key is skipped).
+ */
+message ClprStateItemView {
+    /**
+     * The state value carried by this leaf (StateItem.value).
+     */
+    ClprStateValueView value = 3;
+}
+
+/**
+ * View of a Hiero {@code StateValue}: only the two CLPR state types are decoded. Any other state
+ * variant present on a leaf is an unknown field number here and is skipped by the non-strict parser.
+ */
+message ClprStateValueView {
+    oneof value {
+        /**
+         * A Channel record leaf (StateValue.ClprService_I_CHANNELS).
+         */
+        ClprChannel clpr_channel = 60;
+
+        /**
+         * A queued-message-value leaf (StateValue.ClprService_I_MESSAGE_QUEUE).
+         */
+        ClprMessageValue clpr_message_value = 62;
+    }
+}

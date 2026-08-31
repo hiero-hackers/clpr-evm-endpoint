@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+# kube-prometheus-stack values for local kind development.
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring --create-namespace \
+#     --values dev/values/kube-prometheus-stack.yaml \
+#     --wait
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30090
+  prometheusSpec:
+    # Pick up ServiceMonitors from all namespaces so the relay's ServiceMonitor
+    # (installed in the default namespace) is scraped without label selectors.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    # Retain 24 h of data — sufficient for local testing.
+    retention: 24h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+grafana:
+  adminPassword: admin
+
+  service:
+    type: NodePort
+    nodePort: 30300
+
+  # Sidecar watches for ConfigMaps labelled grafana_dashboard=1 in any namespace
+  # and loads them as dashboards automatically.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# Disable components not needed for local relay testing.
+alertmanager:
+  enabled: false
+
+nodeExporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false

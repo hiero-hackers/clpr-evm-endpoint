@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E2E endpoint image. Deliberately thin: the jars are staged on the HOST by the
+# :clpr-relay-e2e-tests:stageEndpointImage Gradle task from
+# :clpr-relay-app:installDist, so this build is a couple of COPY layers instead
+# of the production Dockerfile's full Gradle-in-Docker build. Same artifacts,
+# same entrypoint — seconds instead of minutes.
+FROM eclipse-temurin:25-jre
+
+WORKDIR /app
+
+COPY lib/ /app/lib/
+COPY log.properties /app/log.properties
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN chmod +x /app/docker-entrypoint.sh
+
+# gRPC sync (9545), gRPC info (9546), Prometheus + /healthz (9547).
+EXPOSE 9545 9546 9547
+
+# Runs as root, unlike the production image. The E2E harness copies a generated
+# relay.yaml into /app at container create time; staying root keeps that write
+# path simple in a throwaway container.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

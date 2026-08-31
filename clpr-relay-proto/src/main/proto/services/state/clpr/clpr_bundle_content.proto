@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package com.hedera.hapi.node.state.clpr;
+
+// SPDX-License-Identifier: Apache-2.0
+option java_package = "com.hederahashgraph.api.proto.java";
+// <<<pbj.java_package = "com.hedera.hapi.node.state.clpr">>> This comment is special code for setting PBJ Compiler java package
+option java_multiple_files = true;
+
+import "services/state/clpr/clpr_message.proto";
+
+/**
+ * Container for the verified content of a bundle, as returned by a verifier
+ * contract's verifyBundle() call.
+ *
+ * <p>For the stub verifier (pre-CLPR-5.1), the submitBundle handler parses
+ * bundle_payload directly as this message type. When a real verifier is
+ * deployed, the verifier contract will parse the proof bytes internally
+ * and return the same logical structure via ABI encoding.
+ */
+message ClprBundleContent {
+    /**
+     * The peer's queue metadata at the time the bundle was constructed.
+     */
+    ClprQueueMetadata metadata = 1;
+
+    /**
+     * Ordered message payloads included in the bundle.
+     * Each payload is a Data, Response, or Control message.
+     */
+    repeated ClprMessagePayload messages = 2;
+}

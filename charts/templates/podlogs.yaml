@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+{{- if .Values.logging.podLogs.enabled }}
+apiVersion: monitoring.grafana.com/v1alpha1
+kind: PodLogs
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+    {{- with .Values.logging.podLogs.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "clpr-evm-endpoint.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ include "clpr-evm-endpoint.namespace" . }}
+  {{- with .Values.logging.podLogs.pipelineStages }}
+  pipelineStages:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.logging.podLogs.relabelings }}
+  relabelings:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

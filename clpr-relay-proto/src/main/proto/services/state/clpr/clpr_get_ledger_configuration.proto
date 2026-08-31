@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package com.hedera.hapi.node.state.clpr;
+
+// SPDX-License-Identifier: Apache-2.0
+option java_package = "com.hederahashgraph.api.proto.java";
+// <<<pbj.java_package = "com.hedera.hapi.node.state.clpr">>> This comment is special code for setting PBJ Compiler java package
+option java_multiple_files = true;
+
+/**
+ * Request message for the getLedgerConfiguration RPC.
+ * Sent by any caller (no authentication required) to learn the responding
+ * endpoint's ledger configuration. Used both for manual channel setup
+ * and by end-to-end tests to discover the data needed to initiate a
+ * Channel on a peer ledger.
+ *
+ * The response is QbftLedgerConfigurationPayload (defined in
+ * clpr_qbft_ledger_configuration_payload.proto), which embeds the
+ * ClprLedgerConfiguration together with the QBFT-specific bits required
+ * by an EVM peer's verifier contract.
+ */
+message ClprGetLedgerConfigurationRequest {
+    /**
+     * On-ledger address of the ClprService whose configuration is requested.
+     * Lets a caller select a specific ledger configuration when the responding
+     * endpoint multiplexes several local chains / ClprService deployments.
+     *
+     * Optional for backward compatibility: when empty, the endpoint returns its
+     * single (or primary) local ledger configuration.
+     */
+    bytes service_address = 1;
+}

@@ -1,0 +1,152 @@
+# Configuration, Running, and Testing
+
+Prerequisite: `docs/README.md`.
+
+## Configuration sources
+
+Three layers, highest priority first:
+
+1. **System properties** — `-Drelay.<key>=<value>`.
+2. **YAML file** — `relay.yaml` in CWD by default. Override with `-Drelay.configFile=<path>` or `RELAY_CONFIG_FILE=<path>`.
+3. **Built-in defaults** — declared in `clpr-relay-app/.../RelayConfig.java`.
+
+`relay-config-example.yaml` (in `clpr-relay-app/src/main/resources/`) is the canonical schema with inline docs.
+
+**Note:** `localNetworks[]`, `clprServices[]`, and `peerProofTypes` are YAML-only — they are lists/maps of structured objects that the property-based config model cannot represent. System properties can override only the scalar `grpc.*` and `backoff.*` blocks.
+
+## Schema (top-level)
+
+The config is a three-tier hierarchy: `localNetworks[]` (a chain the relay talks to) → `clprServices[]` (a `ClprService` contract deployed on one of those networks) → channels (predefined by id and/or discovered on-chain, brought online by the service handler). `RelayInstance` builds a `LocalNetworkAdapter` per network, a `ClprServiceHandler` per service, and a `ClprChannelHandler` per channel.
+
+|                       Key                       |      Default      |                                                                                                                                                                            Notes                                                                                                                                                                            |
+|-------------------------------------------------|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `grpc.port`                                     | `9545`            | Inbound peer-sync RPC port.                                                                                                                                                                                                                                                                                                                                 |
+| `grpc.maxMessageSize`                           | `1048576` (1 MiB) | Maximum gRPC message size in bytes. Applied symmetrically to the inbound PBJ-Helidon server (overrides the 10 KiB PBJ default that is too small for typical bundles and QBFT proofs) and to outbound `ClprEndpointClient` Netty channels (`maxInboundMessageSize`). Validated `> 0` at startup.                                                             |
+| `grpc.sync.tlsEnabled`                          | `false`           | When `true`, the sync listener is mandatory mTLS (`clientAuth=REQUIRED`) and `tlsKeyPath` is required. When `false`, the sync listener is plaintext and `tlsKeyPath` is ignored.                                                                                                                                                                            |
+| `grpc.sync.tlsKeyPath`                          | `""`              | Path to this endpoint's ECDSA P-384 CA private key (PKCS#8 PEM or DER). The relay mints an Ed25519 leaf signed by this key at startup and presents it at every handshake; the CA certificate is never read from disk. Required when `tlsEnabled=true`.                                                                                                      |
+| `grpc.sync.leafCertValiditySeconds`             | `86400` (24 h)    | How often the in-memory leaf certificate is re-minted (seconds). The leaf is regenerated on demand the first time a TLS handshake occurs after the window elapses, so no handshake fails on expiry. Set to `0` to disable rotation (the leaf is then valid for 10 years). Ignored when `tlsEnabled=false`.                                                  |
+| `backoff.baseMs`                                | `1000`            | First-failure backoff (ms) for the per-channel loops; doubles per consecutive failure up to `capMs`. Validated `> 0`. See `architecture.md` → Threading model.                                                                                                                                                                                              |
+| `backoff.capMs`                                 | `30000` (30 s)    | Ceiling on the per-failure backoff (ms). Bounds both retry cost and ERROR-log volume on a persistently-failing channel.                                                                                                                                                                                                                                     |
+| `localNetworks[].id`                            | — (**required**)  | Unique string id referenced by `clprServices[].localNetwork`.                                                                                                                                                                                                                                                                                               |
+| `localNetworks[].proofType`                     | — (**required**)  | `ProofType` discriminator: `QBFT` (Besu/QBFT) or `CometBFT` (Sei). Selects the `getLedgerConfiguration` payload and the inbound `BundlePayloadCodec`. `Hiero` is valid only as a resolved peer proof type, not for a local network.                                                                                                                         |
+| `localNetworks[].evm`                           | — (**required**)  | Common EVM connection parameters (see sub-table). Required for both `QBFT` and `CometBFT` networks.                                                                                                                                                                                                                                                         |
+| `localNetworks[].qbft`                          | defaults          | QBFT proof parameters (see sub-table). Applies to `QBFT` networks; omit to accept defaults.                                                                                                                                                                                                                                                                 |
+| `localNetworks[].cometBft`                      | defaults          | CometBFT proof parameters (see sub-table). Applies to `CometBFT` networks; omit to accept defaults.                                                                                                                                                                                                                                                         |
+| `clprServices[].serviceAddress`                 | — (**required**)  | Checksummed hex address of the deployed `ClprService` contract. The default zero address is a non-functional placeholder. Multiple services may target the same `localNetwork`.                                                                                                                                                                             |
+| `clprServices[].localNetwork`                   | — (**required**)  | `id` of a `localNetworks[]` entry. The relay submits `submitBundle` transactions on this chain for the service's channels.                                                                                                                                                                                                                                  |
+| `clprServices[].defaultSigningPrivateKeyHex`    | `""`              | secp256k1 hex (with or without `0x`) signing key for every channel on this service without a per-channel override. The EVM sender address is derived from it. **Required** when the service discovers channels or has a predefined channel without its own key; validated at startup.                                                                       |
+| `clprServices[].discoverChannels`               | `false`           | Poll this service contract for `ChannelCompleted` events and register channels that appear on-chain after startup. Requires `defaultSigningPrivateKeyHex`. Opt-in.                                                                                                                                                                                          |
+| `clprServices[].discoveryStartBlock`            | `0`               | Block from which discovery begins its `ChannelCompleted` log scan. Set to the block the `ClprService` was deployed at to avoid rescanning from genesis. Also the floor a reorg-triggered rescan resets to.                                                                                                                                                  |
+| `clprServices[].predefinedChannels`             | `[]`              | 32-byte hex channel ids registered at startup (used when discovery is disabled, or alongside it). Each channel's peer proof type is resolved from its on-chain peer `chainId` (see `peerProofTypes`).                                                                                                                                                       |
+| `clprServices[].perChannelSigningPrivateKeyHex` | `{}`              | Per-channel signing-key overrides keyed by channel id. A channel listed here signs with its own key instead of `defaultSigningPrivateKeyHex`.                                                                                                                                                                                                               |
+| `peerProofTypes`                                | `{}`              | Top-level map of peer CAIP-2 `chainId` (e.g. `eip155:1337`, `hiero:mainnet`) to the peer's `ProofType`. Resolves each channel's peer proof type (predefined and discovered) from its on-chain peer `chainId`. An EVM (`eip155:*`) peer with no entry falls back to the local network's `proofType`; a non-EVM peer with no entry is unservable and skipped. |
+
+Channel-level settings are not per-channel config: the commitment level (`LATEST`), sync cadence (`ChannelSyncTask.DEFAULT_INTERVAL_MS`), and proof-lag (`2` for a CometBFT network, `0` otherwise) are applied uniformly to every channel a service serves.
+
+### `localNetworks[].evm` sub-table
+
+Common EVM connection parameters (`CommonEvmParams`). Present on both `QBFT` and `CometBFT` networks — both run an EVM JSON-RPC and the `ClprService` contract.
+
+|          Key          |         Default         |                                                                                 Notes                                                                                  |
+|-----------------------|-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `jsonRpcUrl`          | `http://localhost:8545` | HTTP URL of the EVM JSON-RPC endpoint. HTTP only; WebSocket subscriptions are not used.                                                                                |
+| `chainId`             | `1`                     | EIP-155 chain id. Used for client-side signing.                                                                                                                        |
+| `maxGasPriceCap`      | `Long.MAX_VALUE`        | wei. Hard cap enforced by `Eip1559GasStrategy`: a computed `maxFeePerGas` over this value fails the submission as `FAILED`. Set positive to protect against spikes.    |
+| `gasPriorityFee`      | `2_000_000_000`         | wei (2 gwei). EIP-1559 priority fee (`maxPriorityFeePerGas`), passed through unchanged.                                                                                |
+| `gasBufferMultiplier` | `1.2`                   | Applied to the chain's current `baseFeePerGas`; `maxFeePerGas = round(baseFee × multiplier) + gasPriorityFee`.                                                         |
+| `pollIntervalMs`      | `1000`                  | Interval (ms) between successive on-chain state polls by the listener. Validated `> 0`.                                                                                |
+| `requestTimeoutMs`    | `30000` (30 s)          | Per-request JSON-RPC response timeout (ms). On expiry the request is treated as a transient error and retried up to `maxRpcRetries` times. Validated `> 0` at startup. |
+| `maxRpcRetries`       | `3`                     | Max JSON-RPC retry attempts on transient errors (connection refused, timeout, HTTP 429/503). Total attempts is one more than this. Validated `> 0` at startup.         |
+
+### `localNetworks[].qbft` sub-table
+
+QBFT proof parameters (`QbftConfig`). Applies to `QBFT` networks.
+
+|               Key               | Default |                                                    Notes                                                    |
+|---------------------------------|---------|-------------------------------------------------------------------------------------------------------------|
+| `epochLength`                   | `30000` | QBFT epoch length used to compute the epoch-boundary block header for the `getLedgerConfiguration` payload. |
+| `maxEpochBlockHeadersPerBundle` | `5`     | Maximum epoch block headers to include in a bundle when the remote trust anchor is behind.                  |
+| `maxMessagesPerBundle`          | `10`    | Maximum messages to include in a single bundle.                                                             |
+
+### `localNetworks[].cometBft` sub-table
+
+CometBFT proof parameters (`CometBftConfig`). Applies to `CometBFT` networks; configures the CometBFT proof path (the EVM side is configured via the `evm` block).
+
+|              Key              |         Default          |                                                                         Notes                                                                          |
+|-------------------------------|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cometBftRpcUrl`              | `http://localhost:26657` | CometBFT RPC endpoint for signed headers, validator sets, and ICS-23 ABCI proofs.                                                                      |
+| `maxMessagesPerBundle`        | `10`                     | Maximum messages to include in a CometBFT bundle.                                                                                                      |
+| `maxPriorValidatorSetUpdates` | `10`                     | Maximum prior validator-set updates (trust-anchor rotations) to include in a single bundle when advancing a lagging peer across validator-set changes. |
+| `maxRetries`                  | `3`                      | Max retry attempts for a CometBFT RPC call on transient failure, beyond the initial attempt.                                                           |
+| `requestTimeoutMs`            | `5000`                   | Per-request CometBFT RPC response timeout (ms).                                                                                                        |
+
+## Running
+
+```bash
+./gradlew :clpr-relay-app:installDist
+clpr-relay-app/build/install/clpr-relay-app/bin/clpr-relay-app
+# or:
+java -Drelay.configFile=/etc/clpr/relay.yaml -jar clpr-relay-app/build/libs/clpr-relay-app.jar
+```
+
+The Prometheus metrics endpoint is on `localhost:9547` by default (the gRPC info plane uses 9546).
+
+## Production checklist
+
+- At least one `localNetworks[]` entry, and at least one `clprServices[]` entry with `serviceAddress` set to the real deployed `ClprService` address on its network.
+- Each `clprServices[].defaultSigningPrivateKeyHex` (or every channel's per-channel override) configured — a service that discovers channels or has an unkeyed predefined channel refuses to start otherwise. All transactions are client-signed as EIP-1559 raw transactions; no node-side wallet is involved.
+- `localNetworks[].evm.chainId` matches the target chain for each local network.
+- `localNetworks[].evm.maxGasPriceCap` set to a finite ceiling on each local network.
+- Each signing account holds enough native token on its local chain to pay gas for sustained `submitBundle` traffic. See spec §2.3 and §8.10.
+
+## Tests
+
+### Unit tests
+
+Per-module under `src/test/java`. Run all: `./gradlew test`. Notable suites:
+- `clpr-relay-evm`: `AbiCodecTest`, `EthSignerTest`, `EvmJsonRpcClientTest`, `AccountTransactionSubmitterTest`, `Eip1559GasStrategyTest`, `QbftBundleConstructorTest`, `QbftProofCodecTest`, `SeiBundleConstructorTest`, `SeiLedgerConfigurationProviderTest`.
+- `clpr-relay-sync`: `ChannelSyncTaskTest`, `PeerSelectorTest`, `PeerEndpointCacheTest`.
+
+### Integration tests
+
+In `clpr-relay-integration-tests/`. Run with `./gradlew :clpr-relay-integration-tests:test`.
+
+Layout:
+- `IntegrationTestBase` — common fixtures.
+- `AnvilContainer`, `BesuContainer` — Testcontainers-managed local EVM nodes (Foundry Anvil and Hyperledger Besu, respectively).
+- `ContractDeployer`, `ContractInteractor`, `ContractArtifact`, `DeployedContracts` — admin/test driver that deploys the CLPR contract and exercises the full admin surface (`registerEndpoint`, `registerChannel`, `completeChannel`, `registerConnector`, `completeConnector`, `updateLedgerConfiguration`, `sendMessage`, etc.). The relay process itself only ever calls `submitBundle` and the read methods.
+- Scenario tests:
+- `OneWayMessageTest` — single message ledger A → B.
+- `ReplyFlowTest` — request/response.
+- `BidirectionalMessageTest` — concurrent A↔B.
+- `RelayRecoveryTest` — relay restart preserves state (recovery via on-chain reads).
+- `*ContainerSmokeTest` — sanity-check the EVM containers boot and accept transactions.
+
+The contract bytecode/ABI artifacts the integration tests deploy live in the `clpr-hiero` companion repo; `ContractArtifact` resolves them at test time. There are no `.sol` or compiled artifacts in this repo.
+
+### How the relay's behavior is exercised end-to-end
+
+The integration tests run two relay instances against two distinct EVM containers and drive a full CLPR scenario:
+
+1. `ContractInteractor` deploys `ClprService` on each chain, calls `registerEndpoint` for each relay's endpoint, and creates a channel via the commit-reveal pair (`registerChannel` → `completeChannel`).
+2. `updateLedgerConfiguration` is called to publish each chain's seed endpoint set (pointing at the other relay).
+3. The two relays start, read the ledger config, and begin syncing.
+4. The test drives messages by calling the contract's `sendMessage` and asserts the messages arrive on the other side via state reads.
+
+The corresponding Hiero-side native CLPR test surface (HAPI BDD specs in `clpr-hiero/.../test-clients/.../suites/clpr/`) is the analog of this when the peer is a Hiero ledger, not an EVM ledger.
+
+## Logging and metrics
+
+- Logging via `swirlds-logging`; configuration through standard JUL `logging.properties`.
+- Metrics via `swirlds-metrics-api` exposed as Prometheus on the metrics port. Notable counters:
+  - `sync.cycles.total`, `sync.cycles.failed`, `sync.no_peer_skips`, `sync.no_proof_skips`.
+  - Bundle outcome (metered in `AccountTransactionSubmitter`, labeled by `channel_id`): `sync.bundle.submissions` (receipt-confirmed successes only), `sync.bundle.messages_submitted`, `sync.bundle.bytes_submitted`, `sync.bundle.reverted`, and `sync.bundle.skipped` (labeled `reason=rejected` — the gas-free on-chain preview reverted, which also covers stale/duplicate bundles; `reason=empty` — an empty **ACTIVE** initial-state bundle dropped before any preview; a status-only close at the same counters is not empty and still submitted).
+  - `grpc.sync.requests`, `grpc.sync.errors` (labeled `reason=parse_error|submit_error`).
+  - EVM transactions (metered in `AccountTransactionSubmitter`, labeled by `channel_id`): `evm.tx.submissions` (receipt-confirmed), `evm.tx.reverts`, `evm.tx.failures` (labeled `reason=validation|encode|gas|send|abandoned`; a `gas` failure means the gas-price cap was breached and no transaction was sent, and an `abandoned` failure means the request hit the `MAX_SUBMIT_ROUNDS` safety valve without an on-chain verdict and was left for the sync loop to re-drive), `evm.tx.queue_dropped` (a submit request dropped because that channel's per-channel queue was full), and `evm.tx.queue_deduped` (a re-offered bundle suppressed because byte-identical bundle was already queued for that channel).
+  - **Resource gauges (scrape-time updaters).** Refreshed by a `metrics.addUpdater` on each Prometheus scrape:
+    - `evm.gas_price.base_fee_wei` (`LongGauge`, labeled `network`; registered per `LocalNetworkAdapter`) — the latest block's EIP-1559 base fee per gas in wei, i.e. the floor of every submission's max-fee. Skipped on pre-London chains (no base fee).
+    - `evm.account.balance_eth` (`DoubleGauge`, labeled `account` + `network`; registered per `AccountTransactionSubmitter`) — the signing account's `latest` balance in ETH. Watch for drift toward zero: a drained account can no longer land `submitBundle` transactions.
+  - **Loop-failure aggregates (per-endpoint, never per-channel).** Each per-channel loop family exposes a monotonic failure counter plus two scrape-time gauges computed from the live channel handlers' `FailState` (registered by `RelayInstance`). There are **no** `channelId`-bearing series (swirlds has no labels; the offending channel appears in the ERROR logs and a future `/healthz`, not the TSDB):
+    - sync loop: `sync.cycles.failed` (counter), `sync.channels.failing`, `sync.channels.max_consecutive_failures` (gauges).
+    - listener poll loop: `evm.listener.poll.failed` (counter), `evm.listener.channels.failing`, `evm.listener.channels.max_consecutive_failures` (gauges).
+  - Endpoint-manifest: `evm.listener.manifest.refreshed` (counter) — peer manifest cache refreshes applied after an on-ledger manifest-version advance; `evm.manifest.read.failed` (counter, labeled `scope=local|peer` and `reason=rpc_error|decode_error`) — a `getEndpointManifest`/`getPeerEndpointManifest` `eth_call` or decode failed (the read degrades to an empty manifest; the WARN is throttled, so this counter is the reliable signal).

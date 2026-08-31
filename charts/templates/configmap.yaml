@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+data:
+  # Rendered here, then signing keys are substituted into a writable copy at
+  # container start (docker-entrypoint.sh) and the relay is pointed at that copy
+  # via -Drelay.configFile. Raw signing keys never appear in this ConfigMap:
+  # each service carries an address-keyed __SIGNING_KEY_<ADDR>__ sentinel (and
+  # optionally per-channel __SIGNING_KEY_<CONNID>__ sentinels), replaced with
+  # Secret-sourced env vars at startup.
+  relay.yaml: |
+    grpc:
+      maxMessageSize: {{ .Values.grpc.maxMessageSize | int64 }}
+      info:
+        port: {{ .Values.grpc.info.port }}
+      sync:
+        port: {{ .Values.grpc.sync.port }}
+        {{- if .Values.grpc.sync.tls.enabled }}
+        tlsEnabled: true
+        tlsKeyPath: /app/tls/ca-key.der
+        {{- end }}
+
+    localNetworks:
+    {{- range .Values.localNetworks }}
+      - id: {{ .id | quote }}
+        proofType: {{ .proofType }}
+        {{- if .evm }}
+        evm:
+          jsonRpcUrl: {{ .evm.jsonRpcUrl | quote }}
+          chainId: {{ .evm.chainId }}
+          maxGasPriceCap: {{ .evm.maxGasPriceCap | quote }}
+          gasPriorityFee: {{ .evm.gasPriorityFee | quote }}
+          gasBufferMultiplier: {{ .evm.gasBufferMultiplier }}
+        {{- end }}
+        {{- if .qbft }}
+        qbft:
+          {{- if .qbft.epochLength }}
+          epochLength: {{ .qbft.epochLength }}
+          {{- end }}
+          {{- if .qbft.maxEpochBlockHeadersPerBundle }}
+          maxEpochBlockHeadersPerBundle: {{ .qbft.maxEpochBlockHeadersPerBundle }}
+          {{- end }}
+          {{- if .qbft.maxMessagesPerBundle }}
+          maxMessagesPerBundle: {{ .qbft.maxMessagesPerBundle }}
+          {{- end }}
+        {{- end }}
+        {{- if .cometBft }}
+        cometBft:
+          cometBftRpcUrl: {{ .cometBft.cometBftRpcUrl | quote }}
+          {{- if .cometBft.maxMessagesPerBundle }}
+          maxMessagesPerBundle: {{ .cometBft.maxMessagesPerBundle }}
+          {{- end }}
+          {{- if .cometBft.maxPriorValidatorSetUpdates }}
+          maxPriorValidatorSetUpdates: {{ .cometBft.maxPriorValidatorSetUpdates }}
+          {{- end }}
+          {{- if .cometBft.maxRetries }}
+          maxRetries: {{ .cometBft.maxRetries }}
+          {{- end }}
+          {{- if .cometBft.requestTimeoutMs }}
+          requestTimeoutMs: {{ .cometBft.requestTimeoutMs }}
+          {{- end }}
+        {{- end }}
+    {{- else }}
+      []
+    {{- end }}
+
+    clprServices:
+    {{- range .Values.clprServices }}
+    {{- $addr := .serviceAddress | default "0x0000000000000000000000000000000000000000" }}
+    {{- $addrKey := $addr | upper | trimPrefix "0X" }}
+      - serviceAddress: {{ $addr | quote }}
+        localNetwork: {{ .localNetwork | default "local" | quote }}
+        # Sentinel; replaced with the Secret-sourced signing key at container start.
+        defaultSigningPrivateKeyHex: "__SIGNING_KEY_{{ $addrKey }}__"
+        {{- if .discoverChannels }}
+        discoverChannels: {{ .discoverChannels }}
+        {{- end }}
+        {{- if .discoveryStartBlock }}
+        discoveryStartBlock: {{ .discoveryStartBlock }}
+        {{- end }}
+        {{- if .predefinedChannels }}
+        predefinedChannels:
+        {{- range .predefinedChannels }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .perChannelSigningKeys }}
+        perChannelSigningPrivateKeyHex:
+        {{- range .perChannelSigningKeys }}
+        {{- $connKey := .channelId | upper | trimPrefix "0X" }}
+          {{ .channelId | quote }}: "__SIGNING_KEY_{{ $connKey }}__"
+        {{- end }}
+        {{- end }}
+    {{- else }}
+      []
+    {{- end }}
+
+    {{- if .Values.peerProofTypes }}
+    # Map of peer CAIP-2 chainId -> proof type, used to resolve each channel's
+    # peer proof type from its on-chain peer chainId (e.g. hiero:mainnet -> Hiero).
+    peerProofTypes:
+    {{- range $chainId, $proofType := .Values.peerProofTypes }}
+      {{ $chainId | quote }}: {{ $proofType }}
+    {{- end }}
+    {{- end }}

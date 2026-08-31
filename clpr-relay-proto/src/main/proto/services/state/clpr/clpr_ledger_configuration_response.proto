@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package com.hedera.hapi.node.state.clpr;
+
+// SPDX-License-Identifier: Apache-2.0
+option java_package = "com.hederahashgraph.api.proto.java";
+// <<<pbj.java_package = "com.hedera.hapi.node.state.clpr">>> This comment is special code for setting PBJ Compiler java package
+option java_multiple_files = true;
+
+import "services/state/clpr/clpr_qbft_ledger_configuration_payload.proto";
+
+/**
+ * Wire response for the getLedgerConfiguration gRPC. Carries the
+ * chain-type-specific configuration payload. Exactly one field is set;
+ * callers determine the source chain's consensus type by checking which
+ * field is non-null (Java) or non-default (wire).
+ *
+ * Currently only QBFT chains are supported. Additional chain types will
+ * add new fields here as they are implemented.
+ */
+message ClprLedgerConfigurationResponse {
+    oneof payload {
+        /**
+         * Populated when the source ledger uses QBFT consensus (e.g. Besu).
+         */
+        QbftLedgerConfigurationPayload qbft = 1;
+
+        /**
+         * Populated when the source ledger uses Sei.
+         */
+        ClprSeiLedgerConfigurationPayload sei = 2;
+    }
+}

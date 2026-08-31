@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clpr-evm-endpoint.fullname" . }}-grpc
+  namespace: {{ include "clpr-evm-endpoint.namespace" . }}
+  labels:
+    {{- include "clpr-evm-endpoint.labels" . | nindent 4 }}
+  {{- with .Values.grpc.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.grpc.service.type }}
+  ports:
+    {{- /* Both planes are peer-facing: peers dial sync for the data plane and info for bootstrap
+           discovery (discoverEndpoints) / ledger configuration (getLedgerConfiguration). */}}
+    - port: {{ .Values.grpc.sync.port }}
+      targetPort: grpc-sync
+      protocol: TCP
+      name: grpc-sync
+    - port: {{ .Values.grpc.info.port }}
+      targetPort: grpc-info
+      protocol: TCP
+      name: grpc-info
+  selector:
+    {{- include "clpr-evm-endpoint.selectorLabels" . | nindent 4 }}
