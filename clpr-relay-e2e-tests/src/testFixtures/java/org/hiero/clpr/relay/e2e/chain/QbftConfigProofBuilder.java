@@ -14,8 +14,7 @@ import org.hiero.clpr.relay.evm.model.ProofResponse;
  * Builds the two RLP proofs {@code QBFTVerifier.verifyConfig} demands when a channel is completed
  * against the <b>real</b> verifier.
  *
- * <p>Ported from {@code clpr-e2e/clpr/lib/qbft-config-proof.ts}, whose output is the known-good input
- * for the Besu&harr;Besu CLPR path. Both proofs describe the <em>peer</em> chain: chain A's
+ * <p>Both proofs describe the <em>peer</em> chain: chain A's
  * {@code completeChannel} is handed a proof of chain B's state and vice versa.
  *
  * <p>No RLP library and no {@code debug_} RPC is needed. {@code AbiCodec}'s RLP primitives and

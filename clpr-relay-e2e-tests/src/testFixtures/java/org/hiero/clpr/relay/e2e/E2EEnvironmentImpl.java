@@ -60,7 +60,7 @@ final class E2EEnvironmentImpl implements E2EEnvironment {
             // Chain data and generated configuration live outside it: the output directory is an
             // artifact a CI job uploads, and shipping a Besu database with it would balloon it for no
             // diagnostic value.
-            this.workDirectory = Files.createTempDirectory("clpr-e2e-");
+            this.workDirectory = Files.createTempDirectory("clpr-testing-");
         } catch (final IOException e) {
             throw new UncheckedIOException("failed to prepare the E2E work directory", e);
         }

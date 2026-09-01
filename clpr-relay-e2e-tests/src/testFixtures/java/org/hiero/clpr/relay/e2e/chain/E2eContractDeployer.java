@@ -19,7 +19,7 @@ import org.hiero.clpr.relay.integration.DeployedContracts;
  * suite has no use for: the real {@code QBFTVerifier} and the {@code E2EApplication}.
  *
  * <p>Per-channel contracts ({@code QbftE2EVerifier} wrappers and {@code MockClprConnector}s) are
- * <b>not</b> deployed here. Following clpr-e2e, each channel gets its own verifier wrapper because
+ * <b>not</b> deployed here. Each channel gets its own verifier wrapper because
  * {@code setSeedEndpoints} is per-wrapper and has to name that channel's peer endpoint, so they can
  * only be created once the channel topology is known.
  */
@@ -28,7 +28,7 @@ public final class E2eContractDeployer {
     /**
      * Number of committed seals the deployed {@code QBFTVerifier} requires.
      *
-     * <p>One, matching clpr-e2e's {@code SEAL_SIGNATURES}. The verifier reverts with
+     * <p>The verifier reverts with
      * {@code MultiValidatorNotSupported()} on any epoch header carrying a different validator count,
      * so this constant and {@link BesuNetworkSpec#validatorCount()} have to agree.
      */
