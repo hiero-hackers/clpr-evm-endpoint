@@ -45,8 +45,7 @@ import org.jspecify.annotations.Nullable;
  * HTTP/2 request header that grpc-java's Netty server enforces, so a Hiero
  * consensus node (which uses grpc-java/Netty) returns {@code NOT_FOUND} for
  * every gRPC call from a Helidon-backed client. Once the upstream PBJ bug
- * (see {@code clpr-e2e/docs/PBJ-BUG-TE-trailers.md}) is fixed, we can move
- * back to a single transport.
+ * is fixed, we can move back to a single transport.
  */
 public class ClprEndpointClient implements AutoCloseable {
 

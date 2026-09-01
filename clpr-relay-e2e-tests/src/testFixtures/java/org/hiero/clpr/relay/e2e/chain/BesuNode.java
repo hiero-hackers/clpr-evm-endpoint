@@ -85,7 +85,7 @@ public final class BesuNode {
     void writeConfiguration(final String genesisJson, final String staticNodesJson) {
         try {
             Files.writeString(configDir.resolve("genesis.json"), genesisJson, StandardCharsets.UTF_8);
-            // Besu accepts the raw hex with or without a 0x prefix; clpr-e2e writes it prefixed.
+            // Besu accepts the raw hex with or without a 0x prefix.
             Files.writeString(configDir.resolve("node-key"), nodeKey.privateKeyHex() + "\n", StandardCharsets.UTF_8);
             // Besu reads static-nodes.json from the DATA directory, not the config directory.
             // Peer discovery is disabled, so this file is the only way nodes find each other.

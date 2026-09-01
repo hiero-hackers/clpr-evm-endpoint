@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>A channel needs an endpoint on <b>each</b> side. Chain A's endpoint reads A, builds a bundle and
  * calls {@code sync} on chain B's endpoint, which submits it to B. One process serving both sides is
- * a known relay gap (opt-in only in clpr-e2e), not a supported topology.
+ * a known relay gap, not a supported topology.
  *
  * @param networkA one side's chain
  * @param networkB the other side's chain
@@ -44,7 +44,7 @@ public record ChannelSpec(
     /** Minimum locked stake the service accepts: 0.1 ether. */
     public static final BigInteger DEFAULT_CONNECTOR_STAKE_WEI = BigInteger.valueOf(100_000_000_000_000_000L);
 
-    /** 1 ether of prepaid execution budget, matching clpr-e2e. */
+    /** 1 ether of prepaid execution budget. */
     public static final BigInteger DEFAULT_CONNECTOR_FUNDING_WEI = BigInteger.valueOf(1_000_000_000_000_000_000L);
 
     public ChannelSpec {

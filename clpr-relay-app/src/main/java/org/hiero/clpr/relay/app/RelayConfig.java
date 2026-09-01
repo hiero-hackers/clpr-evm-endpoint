@@ -45,7 +45,7 @@ public record RelayConfig(
     /**
      * Known peer CAIP-2 {@code chainId} → {@link ProofType} mappings, used by {@code RelayConfigLoader}
      * as the fallback when the config supplies no {@code peerProofTypes}. Covers the public networks
-     * plus the local/dev chains the test harness (clpr-e2e) uses, so standard deployments need no
+     * plus the local/dev chains the test harness uses, so standard deployments need no
      * explicit mapping. Note that a Sei peer's CLPR identity is its <b>CometBFT chain-id</b>
      * (e.g. {@code pacific-1}, {@code sei-local}), not {@code eip155:<evmChainId>}.
      */

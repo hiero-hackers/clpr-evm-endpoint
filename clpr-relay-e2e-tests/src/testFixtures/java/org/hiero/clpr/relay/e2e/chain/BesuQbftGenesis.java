@@ -14,8 +14,7 @@ import org.hiero.clpr.relay.evm.AbiCodec;
  * Builds a Besu QBFT genesis document plus the derived per-node material (validator keys, enode
  * URLs) for one {@link BesuNetworkSpec}.
  *
- * <p>Ported from {@code clpr-e2e/shared/scripts/networks/generate-besu-genesis.ts}, whose output
- * drives the known-green Besu&harr;Besu CLPR path. Two details there are load-bearing and easy to
+ * <p>Two details there are load-bearing and easy to
  * get subtly wrong, so they are called out at their implementation sites below: the exact shape of
  * the QBFT {@code extraData} RLP, and the fork schedule.
  */
@@ -29,8 +28,7 @@ public final class BesuQbftGenesis {
      * <p>Chosen to stay under {@code Long.MAX_VALUE} wei (~9.22 ETH), which is a hard ceiling rather
      * than a preference: {@code sendRawTx} and {@code signEip1559Transaction} carry {@code valueWei}
      * as a {@code long}, so a balance above it cannot be swept in one transaction — and
-     * {@code Faults.drainSigningAccount} exists to do exactly that. clpr-e2e uses 1,000,000 ETH, which
-     * would make that fault unimplementable.
+     * {@code Faults.drainSigningAccount} exists to do exactly that.
      *
      * <p>8 ETH is ample for a test: at the ~2 gwei this dev chain settles at, a submitBundle costs
      * well under a milli-ETH, so this covers thousands of them plus every deploy, stake and connector
@@ -46,8 +44,7 @@ public final class BesuQbftGenesis {
      *
      * <p>Osaka's EIP-7825 caps any single transaction at 16,777,216 gas. Inbound CLPR bundles can
      * legitimately exceed that, so activating Osaka would make large bundles fail with
-     * out-of-gas rather than a CLPR-level error — an extremely confusing failure mode. clpr-e2e
-     * pins the same value for the same reason.
+     * out-of-gas rather than a CLPR-level error — an extremely confusing failure mode.
      */
     private static final long OSAKA_TIME_DISABLED = 4102444800L;
 

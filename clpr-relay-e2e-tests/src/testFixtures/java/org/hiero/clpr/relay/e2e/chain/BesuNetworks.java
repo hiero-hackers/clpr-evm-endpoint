@@ -13,7 +13,7 @@ import org.testcontainers.containers.Network;
  *
  * <p>Networks are added before {@code startAll()} and get their ids and chain ids assigned
  * automatically as they are added — {@code besu-0} at {@code 31337}, {@code besu-1} at
- * {@code 31338}, matching clpr-e2e's besu1/besu2 pair. Distinct chain ids are not cosmetic: a
+ * {@code 31338}. Distinct chain ids are not cosmetic: a
  * channel's id is derived from both chains' CAIP-2 ids and the relay resolves a peer's proof type by
  * chain id, so two chains sharing an id would make both ambiguous. An explicit
  * {@link BesuNetworkSpec#withChainId} wins over the automatic numbering.

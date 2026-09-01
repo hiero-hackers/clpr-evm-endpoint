@@ -36,7 +36,7 @@ public record BesuNetworkSpec(
     /** Besu release used by the CLPR contract E2E backend; QBFT-capable without the removed flags. */
     public static final String DEFAULT_IMAGE = "hyperledger/besu:26.5.0";
 
-    /** First chain id handed out; the second network gets 31338, matching clpr-e2e's besu1/besu2. */
+    /** First chain id handed out; the second network gets 31338 */
     public static final long FIRST_CHAIN_ID = 31337L;
 
     public BesuNetworkSpec {
